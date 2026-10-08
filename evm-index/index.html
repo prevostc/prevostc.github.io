@@ -1,0 +1,1080 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>evm-index, in one minute</title>
+<meta name="description" content="What the evm-index frameworks do: you write one function per kind of contract, the indexer runs a track per contract and keeps it running, the fetch layer turns every need into few cheap requests.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one map read left to right (what you write, the indexer, the fetch layer, the sources); eight scenes from the base case up, each looping; then the same in code, a small chart beside each sample. */
+:root {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --surface: #161b22;
+  --surface-2: #1d242e;
+  --line: #2c3541;
+  --fg: #d9dee5;
+  --muted: #8b95a3;
+  --accent: #4fd1b5;       /* facts and the fetch layer: teal */
+  --live: #f0b94b;         /* class: live */
+  --backfill: #63a9ea;     /* class: backfill */
+  --spec: #a391d9;         /* class: speculative */
+  --good: #6fcf7a;
+  --bad: #e5655d;
+  --dim: 0.3;
+  --sans: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f5f6f3; --surface: #ffffff; --surface-2: #eef1ee; --line: #d3d9d4;
+    --fg: #1c2229; --muted: #5a6572; --accent: #0f8f75; --live: #b4761a;
+    --backfill: #2a6db3; --spec: #6a5bb5; --good: #2f8a4f; --bad: #c43f36; --dim: 0.34;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f6f3; --surface: #ffffff; --surface-2: #eef1ee; --line: #d3d9d4;
+  --fg: #1c2229; --muted: #5a6572; --accent: #0f8f75; --live: #b4761a;
+  --backfill: #2a6db3; --spec: #6a5bb5; --good: #2f8a4f; --bad: #c43f36; --dim: 0.34;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.55 var(--sans);
+  padding-inline: 16px; padding-block: 28px 56px;
+}
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+code { font: 0.86em var(--mono); color: var(--fg); background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.wrap { max-width: 1480px; margin-inline: auto; display: grid; gap: 26px; }
+.main { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+@media (min-width: 1000px) { .main { grid-template-columns: minmax(0, 1fr) 324px; gap: 28px; } .main .controls { position: sticky; top: 16px; } }
+
+header { display: grid; gap: 10px; max-width: 72ch; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(22px, 3.4vw, 30px); line-height: 1.2; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { color: var(--muted); margin: 0; font-size: 16px; max-width: 64ch; }
+
+.stage { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; overflow: hidden; }
+.stage .scroll { overflow-x: auto; }
+.stage svg { display: block; width: 100%; min-width: 620px; height: auto; font-family: var(--mono); }
+
+.controls { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+@media (min-width: 600px) and (max-width: 999px) { .controls { grid-template-columns: 300px 1fr; gap: 16px 28px; } }
+.scenes { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.scenes button {
+  width: 100%; text-align: left; display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: baseline;
+  background: transparent; color: var(--muted); border: 1px solid transparent; border-radius: 6px;
+  padding: 6px 10px; font: 500 14px/1.3 var(--sans); cursor: pointer; position: relative;
+}
+.scenes button .n { font: 600 12px var(--mono); color: var(--muted); }
+.scenes button:hover { color: var(--fg); background: var(--surface-2); }
+.scenes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.scenes button[aria-current="true"] { color: var(--fg); background: var(--surface-2); border-color: var(--line); }
+.scenes button[aria-current="true"] .n { color: var(--accent); }
+.scenes button .bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--accent); border-radius: 2px; }
+.play-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.play-row button {
+  background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 12px; font: 500 13px var(--sans); cursor: pointer;
+}
+.play-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.play-row .hint { font: 12px var(--mono); color: var(--muted); }
+
+.caption { min-width: 0; display: grid; gap: 10px; align-content: start; }
+.caption h2 { margin: 0; font-size: 19px; line-height: 1.3; letter-spacing: -0.005em; text-wrap: balance; max-width: 38ch; }
+.caption p { margin: 0; max-width: 62ch; color: var(--muted); font-size: 15px; }
+.caption .fact { font: 13px/1.5 var(--mono); color: var(--fg); border-left: 2px solid var(--accent); padding-left: 10px; }
+
+h2.sec { margin: 8px 0 0; font-size: 20px; letter-spacing: -0.005em; }
+.sec-lede { margin: -16px 0 0; color: var(--muted); max-width: 70ch; }
+.code-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.sample { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: auto 1fr; }
+.sample h3 { grid-column: 1 / -1; margin: 0; font-size: 14px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.sample h3 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.sample .mini { grid-column: 1; grid-row: 2 / span 2; padding: 12px 14px; border-right: 1px solid var(--line); display: grid; align-content: start; gap: 8px; }
+.sample .mini svg { width: 100%; height: auto; font-family: var(--mono); }
+.sample .mini p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.sample pre { grid-column: 2; margin: 0; padding: 12px 14px; overflow-x: auto; font: 11.5px/1.5 var(--mono); color: var(--fg); min-width: 0; }
+.sample pre + pre { border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .sample { grid-template-columns: 1fr; } .sample .mini { grid-row: auto; border-right: 0; border-bottom: 1px solid var(--line); } .sample pre { grid-column: 1; } }
+.sample .k { color: var(--backfill); }
+.sample .c { color: var(--muted); font-style: italic; }
+.sample .a { color: var(--live); }
+.sample .t { color: var(--accent); }
+.sample .s { color: var(--spec); }
+.mini rect.b { fill: var(--surface-2); stroke: var(--line); }
+.mini rect.b.on { stroke: var(--accent); }
+.mini text { fill: var(--fg); font-size: 9.5px; }
+.mini text.m { fill: var(--muted); font-size: 8.5px; }
+.mini path, .mini line { stroke: var(--muted); fill: none; stroke-width: 1.2; }
+.mini path.dash { stroke-dasharray: 3 3; }
+.mini .ar { fill: var(--muted); }
+
+.layers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .layers { grid-template-columns: 1fr; } }
+.layer { border-top: 2px solid var(--line); padding-top: 12px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.layer .k { font: 600 12px var(--mono); color: var(--accent); letter-spacing: 0.04em; }
+.layer h3 { margin: 0; font-size: 16px; line-height: 1.3; }
+.layer p { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* diagram */
+.node rect.box { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+.node text.t { fill: var(--fg); font-size: 13px; font-weight: 600; }
+.node text.s { fill: var(--muted); font-size: 10.5px; }
+.node text.c { fill: var(--fg); font-size: 9.5px; }
+.node text.c.changed { fill: var(--accent); font-weight: 600; }
+.node text.ver { fill: var(--accent); font-size: 10px; font-weight: 600; }
+.node.on rect.box { stroke: var(--accent); }
+.node.called rect.box { stroke: var(--accent); stroke-width: 2; }
+.node.src text.t { font-size: 10.5px; }
+.node.src text.tag { fill: var(--muted); font-size: 9.5px; }
+.node.src text.lag { fill: var(--muted); font-size: 9.5px; }
+.node.src .glyph { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.node.src .glyph-fill { fill: var(--muted); }
+.node.src.on .glyph { stroke: var(--accent); }
+.node.src.on .glyph-fill { fill: var(--accent); }
+.node.src .dot { fill: var(--good); }
+.node.src.distrusted .dot { fill: var(--bad); }
+.node.src.distrusted rect.box { stroke: var(--bad); }
+.node.src.distrusted text.t { text-decoration: line-through; }
+.node.src .meter { fill: var(--line); }
+.node.src .meter-fill { fill: var(--backfill); }
+.node.src .meter-live { fill: var(--live); }
+.node.money .dot { fill: var(--muted); }
+.node.money rect.box { stroke-dasharray: 3 3; }
+.frame-t { fill: var(--muted); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+.edge path { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.edge.dash path { stroke-dasharray: 5 4; }
+.edge text { fill: var(--muted); font-size: 10.5px; }
+.edge.on path { stroke: var(--accent); }
+.edge.on text { fill: var(--fg); }
+#arrow { fill: var(--muted); }
+
+.grp text.h { fill: var(--fg); font-size: 10.5px; font-weight: 600; }
+.grp text.ver { fill: var(--accent); font-size: 10px; font-weight: 600; }
+.grp text.l { fill: var(--muted); font-size: 9px; }
+.grp text.more { fill: var(--muted); font-size: 9.5px; }
+.grp rect.cell { fill: var(--surface); stroke: var(--line); stroke-width: 0.7; }
+.grp rect.cell.past { fill: var(--line); }
+.grp rect.cell.log { fill: var(--backfill); stroke: var(--backfill); }
+.grp rect.cell.cur { fill: var(--accent); stroke: var(--accent); }
+.chain { fill: none; stroke: var(--line); stroke-dasharray: 4 3; }
+.grp rect.cell.orphan { fill: var(--bad); stroke: var(--bad); }
+.grp rect.cell.future { fill: var(--surface); stroke-dasharray: 2 2; }
+.grp rect.bar-bg { fill: var(--line); }
+.grp rect.bar { fill: var(--accent); }
+.grp .lane { transition: opacity 0.6s; }
+
+.pdot.live { fill: var(--live); } .pdot.backfill { fill: var(--backfill); } .pdot.spec { fill: var(--spec); }
+.packed rect { fill: var(--surface); stroke: var(--line); }
+.packed text { fill: var(--muted); font-size: 10px; }
+.packed.on rect { stroke: var(--accent); }
+.packed.on text { fill: var(--fg); }
+.counter { fill: var(--muted); font-size: 10.5px; }
+.counter.big { fill: var(--fg); font-weight: 600; }
+
+.legend text { fill: var(--muted); font-size: 10.5px; }
+.rows text { fill: var(--fg); font-size: 9.5px; }
+.rows rect { fill: var(--surface); stroke: var(--line); }
+.rows.gone rect { stroke: var(--bad); }
+.rows text.q { fill: var(--accent); font-size: 10px; }
+
+.pkt circle { stroke: var(--bg); stroke-width: 1.5; }
+.pkt rect.lbl { fill: var(--surface); stroke: var(--line); }
+.pkt text { font-size: 10px; fill: var(--fg); font-weight: 500; }
+.pkt.live circle { fill: var(--live); }
+.pkt.backfill circle { fill: var(--backfill); }
+.pkt.spec circle { fill: var(--spec); }
+.pkt.fact circle { fill: var(--accent); }
+.pkt.state circle { fill: var(--muted); }
+.pkt.bad circle { fill: var(--bad); }
+.pkt.good circle { fill: var(--good); }
+.flash rect { fill: var(--surface); stroke: var(--line); }
+.flash text { font-size: 10.5px; fill: var(--fg); font-weight: 600; }
+.flash.bad text { fill: var(--bad); }
+.flash.good text { fill: var(--good); }
+.flash.live text { fill: var(--live); }
+.flash.accent text { fill: var(--accent); }
+.node, .edge, .packed, .frame-t, .counter, .grp { transition: opacity 0.5s; }
+.dimmed { opacity: var(--dim); }
+.node.src rect.box, .node.src text.t, .node.src .dot { transition: stroke 0.3s, fill 0.3s; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">evm-index · what it does</div>
+  <h1>A framework for indexing EVM chains.</h1>
+  <p class="lede">Two frameworks, each usable alone: tracks run by an indexer, and a fetch layer. Nine scenes, from the base case up, each looping until you move on.</p>
+</header>
+
+<div class="main">
+<section class="stage" aria-label="Map of an indexer built on evm-index">
+  <div class="scroll">
+  <svg id="map" viewBox="0 0 900 900" role="img" aria-label="Top to bottom: the track functions you write, the indexer that runs one track per contract over the chain's blocks, beside it the facts as tables you query and the store that keeps everything, then the fetch layer whose planner packs the tracks' needs into requests, and the sources of several types that answer.">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z"></path>
+      </marker>
+    </defs>
+    <g id="layer-frames"></g>
+    <g id="layer-edges"></g>
+    <g id="layer-nodes"></g>
+    <g id="layer-legend" class="legend"></g>
+    <g id="layer-fx"></g>
+    <g id="layer-pkts"></g>
+  </svg>
+  </div>
+</section>
+
+<section class="controls">
+  <div>
+    <ol class="scenes" id="scenes" aria-label="Scenes"></ol>
+    <div class="play-row">
+      <button type="button" id="play" aria-pressed="true">Pause</button>
+      <span class="hint" id="hint">plays on its own · click a scene to stay on it</span>
+    </div>
+  </div>
+  <div class="caption" id="caption" aria-live="polite">
+    <h2 id="cap-title"></h2>
+    <p id="cap-body"></p>
+    <p class="fact" id="cap-fact"></p>
+  </div>
+</section>
+</div>
+
+<h2 class="sec">The same, in code</h2>
+<p class="sec-lede">How a track is declared, how it reads the chain, how tracks form a graph, and how an indexer is started and read.</p>
+<section class="code-grid" aria-label="Code samples">
+
+  <div class="sample">
+    <h3>A track<small>one function per log, with state of its own</small></h3>
+    <div class="mini">
+      <svg viewBox="0 0 240 96" role="img" aria-label="The logs of a token go into the function one at a time; it reads and writes its state and emits Transfer facts.">
+        <defs><marker id="ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ar"></path></marker></defs>
+        <rect class="b" x="4" y="22" width="50" height="26" rx="4"></rect><text x="29" y="33" text-anchor="middle">USDC</text><text x="29" y="43" text-anchor="middle" class="m">every log</text>
+        <path d="M56,35 L78,35" marker-end="url(#ma)"></path>
+        <rect class="b on" x="80" y="16" width="96" height="38" rx="4"></rect><text x="128" y="31" text-anchor="middle">token_transfers</text><text x="128" y="43" text-anchor="middle" class="m">(t, token, log, state)</text>
+        <path d="M178,35 L196,35" marker-end="url(#ma)"></path>
+        <rect class="b" x="198" y="22" width="38" height="26" rx="4"></rect><text x="217" y="38" text-anchor="middle">facts</text>
+        <path d="M132,56 L132,70" marker-end="url(#ma)"></path><path d="M122,70 L122,58" marker-end="url(#ma)" class="dash"></path>
+        <rect class="b" x="86" y="72" width="84" height="20" rx="4"></rect><text x="128" y="85" text-anchor="middle" class="m">state: balance map</text>
+      </svg>
+      <p>One call per log, in order. The state is loaded before each call and committed with the cursor.</p>
+    </div>
+<pre>#[derive(State)]
+struct Ledger { balance: Map&lt;Address, Amount&gt; }
+
+/// Every log of the token, from its creation, in order.
+#[track(version = 1, emits(Transfer))]
+async fn token_transfers(t: &amp;Track, token: &amp;Contract, log: Log, state: &amp;mut Ledger) -&gt; anyhow::Result&lt;()&gt; {
+    let Some(Event::Transfer(e)) = log.event() else { return Ok(()) };
+    let before = state.balance.get(&amp;e.to).await?.unwrap_or_default();
+    state.balance.set(e.to, before + e.value)?;
+    t.emit(Transfer { token: token.address, from: e.from, to: e.to, value: e.value })
+}</pre>
+  </div>
+
+  <div class="sample">
+    <h3>Reading the chain<small>at the block the track is at</small></h3>
+    <div class="mini">
+      <svg viewBox="0 0 220 96" role="img" aria-label="A clock tick wakes every pool's track; the calls they make at that block leave as one multicall.">
+        <defs><marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ar"></path></marker></defs>
+        <rect class="b" x="4" y="30" width="44" height="26" rx="4"></rect><text x="26" y="41" text-anchor="middle">tick</text><text x="26" y="51" text-anchor="middle" class="m">15 min</text>
+        <path d="M50,43 L72,43" marker-end="url(#mb)"></path>
+        <rect class="b on" x="74" y="10" width="62" height="20" rx="4"></rect><text x="105" y="23" text-anchor="middle">pool_tvl ×300</text>
+        <rect class="b on" x="74" y="34" width="62" height="20" rx="4"></rect><text x="105" y="47" text-anchor="middle">pool_tvl</text>
+        <rect class="b on" x="74" y="58" width="62" height="20" rx="4"></rect><text x="105" y="71" text-anchor="middle">pool_tvl</text>
+        <path d="M138,20 C150,20 150,43 160,43" ></path><path d="M138,44 L160,44"></path><path d="M138,68 C150,68 150,43 160,43" marker-end="url(#mb)"></path>
+        <rect class="b" x="162" y="30" width="54" height="26" rx="4"></rect><text x="189" y="41" text-anchor="middle">1 multicall</text><text x="189" y="51" text-anchor="middle" class="m">600 calls</text>
+        <text x="105" y="92" text-anchor="middle" class="m">answers cached in the store</text>
+      </svg>
+      <p>Calls run at the block being processed. Calls of every track at a block go out together.</p>
+    </div>
+<pre>/// Every 15 minutes (the first block at or after each boundary), for every pool.
+#[track(version = 1, emits(PoolTvl), every = 900)]
+async fn pool_tvl(t: &amp;Track, pool: &amp;Contract, _: Tick) -&gt; anyhow::Result&lt;()&gt; {
+    let (supply, held) = t.calls((
+        (pool.address, totalSupplyCall {}),
+        (pool.address, balanceCall {}),
+    )).await?;
+    t.emit(PoolTvl { pool: pool.address, supply, held })
+}
+// One call: t.call(pool.address, totalSupplyCall {}).await?   Another block: t.call_at(block, ..)</pre>
+  </div>
+
+  <div class="sample">
+    <h3>Tracks form a graph<small>discover contracts, spawn one track each, read other tracks' facts</small></h3>
+    <div class="mini">
+      <svg viewBox="0 0 244 100" role="img" aria-label="A factory spawns one token_transfers track per token; usd_volume reads the facts of token_transfers and token_prices.">
+        <defs><marker id="mc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ar"></path></marker></defs>
+        <rect class="b" x="4" y="8" width="56" height="20" rx="4"></rect><text x="32" y="21" text-anchor="middle">discovery</text>
+        <path d="M62,18 L80,18" marker-end="url(#mc)" class="dash"></path><text x="70" y="8" text-anchor="middle" class="m">spawns</text>
+        <rect class="b" x="82" y="4" width="76" height="20" rx="4"></rect><text x="120" y="17" text-anchor="middle">token_transfers</text>
+        <rect class="b" x="86" y="10" width="76" height="20" rx="4"></rect><rect class="b" x="90" y="16" width="76" height="20" rx="4"></rect><text x="128" y="29" text-anchor="middle">token_transfers</text>
+        <rect class="b" x="82" y="56" width="76" height="20" rx="4"></rect><text x="120" y="69" text-anchor="middle">token_prices</text>
+        <path d="M168,30 C196,30 196,46 206,46" marker-end="url(#mc)"></path><path d="M160,66 C196,66 196,50 206,50" marker-end="url(#mc)"></path>
+        <text x="186" y="40" text-anchor="middle" class="m">facts</text>
+        <rect class="b on" x="208" y="38" width="20" height="20" rx="4"></rect>
+        <text x="240" y="72" text-anchor="end">priced_transfers</text>
+        <text x="110" y="94" text-anchor="middle" class="m">a rewind upstream rewinds downstream</text>
+      </svg>
+      <p>A track finds contracts and starts others, and may read what others emit, in block order. Tracks make an acyclic graph.</p>
+    </div>
+<pre>/// Polls an API for contracts to follow. Each new one is asked where it was created
+/// (an explorer, or a factory's announcement), then tracked from that block.
+#[track(version = 1, emits(Discovered), spawns(TokenTransfers))]
+async fn discovery(t: Track, api: ApiParams) -&gt; anyhow::Result&lt;()&gt; {
+    let mut answers = t.poll(Api::new(&amp;api.url), Duration::from_secs(60));
+    loop {
+        for token in answers.next().await?.new_contracts() {
+            let Some(creation) = t.creation(token).await? else { continue };
+            t.emit(Discovered { address: token, block: creation.block })?;
+            t.spawn::&lt;TokenTransfers&gt;(Contract { chain: api.chain, address: token, from: creation.block })?;
+        }
+    }
+}
+// A factory's logs do the same with t.created(e.token) and #[track(.., announces_creations)].
+
+/// Each Transfer with the USD price in force at its block: two tracks' facts, in block
+/// order. If either track rewinds, this one rewinds with it.
+#[track(version = 1, emits(PricedTransfer))]
+async fn priced_transfers(t: Track, token: Contract) -&gt; anyhow::Result&lt;()&gt; {
+    let mut input = t.merge(
+        t.facts::&lt;Transfer&gt;(track_id::&lt;TokenTransfers&gt;(&amp;token), token.from),
+        t.facts::&lt;Price&gt;(track_id::&lt;TokenPrices&gt;(&amp;token), token.from),
+    );
+    let mut usd = None;
+    loop {
+        match input.next().await? {
+            Either::Right(price) =&gt; usd = Some(price.usd),
+            Either::Left(tr) =&gt; if let Some(usd) = usd { t.emit(PricedTransfer { usd: tr.value * usd, ..tr })? },
+        }
+    }
+}</pre>
+  </div>
+
+  <div class="sample">
+    <h3>An indexer, and its data<small>a binary naming its starting tracks</small></h3>
+    <div class="mini">
+      <svg viewBox="0 0 220 96" role="img" aria-label="The binary starts tracks, which fill tables that any SQL reader opens.">
+        <defs><marker id="md" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ar"></path></marker></defs>
+        <rect class="b on" x="4" y="28" width="62" height="30" rx="4"></rect><text x="35" y="41" text-anchor="middle">my-indexer</text><text x="35" y="52" text-anchor="middle" class="m">run</text>
+        <path d="M68,43 L90,43" marker-end="url(#md)"></path>
+        <rect class="b" x="92" y="22" width="50" height="42" rx="4"></rect><text x="117" y="36" text-anchor="middle">tables</text><text x="117" y="47" text-anchor="middle" class="m">Delta or</text><text x="117" y="57" text-anchor="middle" class="m">Postgres</text>
+        <path d="M144,43 L166,43" marker-end="url(#md)"></path>
+        <rect class="b" x="168" y="22" width="48" height="42" rx="4"></rect><text x="192" y="36" text-anchor="middle">SQL</text><text x="192" y="47" text-anchor="middle" class="m">DuckDB</text><text x="192" y="57" text-anchor="middle" class="m">Polars</text>
+        <text x="110" y="86" text-anchor="middle" class="m">run · run --rebuild · track replay</text>
+      </svg>
+      <p>Sources, budgets and rates live in a config file, reloaded as it changes.</p>
+    </div>
+<pre>fn main() -&gt; anyhow::Result&lt;()&gt; {
+    evm_indexer_cli::main(Indexer::new("my-indexer").tracks(start_tracks).views(views()))
+}</pre>
+<pre>-- A fact with a key shows its current row per key; every row is in &lt;fact&gt;__history.
+SELECT token, account, balance FROM token_balance WHERE account = '0x4b…e1';
+SELECT * FROM transfer__history ORDER BY block_number DESC, seq DESC LIMIT 20;</pre>
+  </div>
+</section>
+
+<section class="layers" aria-label="The two frameworks">
+  <div class="layer">
+    <div class="k">crates/evm-data/indexer · evm-indexer-*</div>
+    <h3>Tracks, run by an indexer</h3>
+    <p>A track is a function called once per input, in order, with a state struct of its own. The indexer runs one per contract with its own cursor, rewinds on reorgs, rebuilds a kind from the persistent store when its logic changes, and commits facts as Delta or Postgres tables. <a href="https://github.com/prevostc/evm-index/blob/main/docs/design.md">design.md</a>, <a href="https://github.com/prevostc/evm-index/blob/main/docs/storage.md">storage.md</a>.</p>
+  </div>
+  <div class="layer">
+    <div class="k">crates/evm-data/fetch · evm-fetch-*</div>
+    <h3>A fetch layer</h3>
+    <p>Callers say what they need and how urgent it is, never which source. Needs are packed into as few requests as the sources take, each sent where price plus the worth of the wait is lowest, under the budget and rates you declare. Nodes, explorers and HTTP APIs alike; every one learned by using it. <a href="https://github.com/prevostc/evm-index/blob/main/docs/fetch-algorithm.md">fetch-algorithm.md</a>, with what was measured.</p>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg', XL = 'http://www.w3.org/1999/xlink';
+  var ICONS = {"usdc": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIj48Y2lyY2xlIGZpbGw9IiMzRTczQzQiIGN4PSIxNiIgY3k9IjE2IiByPSIxNiIvPjxnIGZpbGw9IiNGRkYiPjxwYXRoIGQ9Ik0yMC4wMjIgMTguMTI0YzAtMi4xMjQtMS4yOC0yLjg1Mi0zLjg0LTMuMTU2LTEuODI4LS4yNDMtMi4xOTMtLjcyOC0yLjE5My0xLjU3OCAwLS44NS42MS0xLjM5NiAxLjgyOC0xLjM5NiAxLjA5NyAwIDEuNzA3LjM2NCAyLjAxMSAxLjI3NWEuNDU4LjQ1OCAwIDAwLjQyNy4zMDNoLjk3NWEuNDE2LjQxNiAwIDAwLjQyNy0uNDI1di0uMDZhMy4wNCAzLjA0IDAgMDAtMi43NDMtMi40ODlWOS4xNDJjMC0uMjQzLS4xODMtLjQyNS0uNDg3LS40ODZoLS45MTVjLS4yNDMgMC0uNDI2LjE4Mi0uNDg3LjQ4NnYxLjM5NmMtMS44MjkuMjQyLTIuOTg2IDEuNDU2LTIuOTg2IDIuOTc0IDAgMi4wMDIgMS4yMTggMi43OTEgMy43NzggMy4wOTUgMS43MDcuMzAzIDIuMjU1LjY2OCAyLjI1NSAxLjYzOSAwIC45Ny0uODUzIDEuNjM4LTIuMDExIDEuNjM4LTEuNTg1IDAtMi4xMzMtLjY2Ny0yLjMxNi0xLjU3OC0uMDYtLjI0Mi0uMjQ0LS4zNjQtLjQyNy0uMzY0aC0xLjAzNmEuNDE2LjQxNiAwIDAwLS40MjYuNDI1di4wNmMuMjQzIDEuNTE4IDEuMjE5IDIuNjEgMy4yMyAyLjkxNHYxLjQ1N2MwIC4yNDIuMTgzLjQyNS40ODcuNDg1aC45MTVjLjI0MyAwIC40MjYtLjE4Mi40ODctLjQ4NVYyMS4zNGMxLjgyOS0uMzAzIDMuMDQ3LTEuNTc4IDMuMDQ3LTMuMjE3eiIvPjxwYXRoIGQ9Ik0xMi44OTIgMjQuNDk3Yy00Ljc1NC0xLjctNy4xOTItNi45OC01LjQyNC0xMS42NTMuOTE0LTIuNTUgMi45MjUtNC40OTEgNS40MjQtNS40MDIuMjQ0LS4xMjEuMzY1LS4zMDMuMzY1LS42MDd2LS44NWMwLS4yNDItLjEyMS0uNDI0LS4zNjUtLjQ4NS0uMDYxIDAtLjE4MyAwLS4yNDQuMDZhMTAuODk1IDEwLjg5NSAwIDAwLTcuMTMgMTMuNzE3YzEuMDk2IDMuNCAzLjcxNyA2LjAxIDcuMTMgNy4xMDIuMjQ0LjEyMS40ODggMCAuNTQ4LS4yNDMuMDYxLS4wNi4wNjEtLjEyMi4wNjEtLjI0M3YtLjg1YzAtLjE4Mi0uMTgyLS40MjQtLjM2NS0uNTQ2em02LjQ2LTE4LjkzNmMtLjI0NC0uMTIyLS40ODggMC0uNTQ4LjI0Mi0uMDYxLjA2MS0uMDYxLjEyMi0uMDYxLjI0M3YuODVjMCAuMjQzLjE4Mi40ODUuMzY1LjYwNyA0Ljc1NCAxLjcgNy4xOTIgNi45OCA1LjQyNCAxMS42NTMtLjkxNCAyLjU1LTIuOTI1IDQuNDkxLTUuNDI0IDUuNDAyLS4yNDQuMTIxLS4zNjUuMzAzLS4zNjUuNjA3di44NWMwIC4yNDIuMTIxLjQyNC4zNjUuNDg1LjA2MSAwIC4xODMgMCAuMjQ0LS4wNmExMC44OTUgMTAuODk1IDAgMDA3LjEzLTEzLjcxN2MtMS4wOTYtMy40Ni0zLjc3OC02LjA3LTcuMTMtNy4xNjJ6Ii8+PC9nPjwvZz48L3N2Zz4=", "eth": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNiIgZmlsbD0iIzYyN0VFQSIvPjxnIGZpbGw9IiNGRkYiIGZpbGwtcnVsZT0ibm9uemVybyI+PHBhdGggZmlsbC1vcGFjaXR5PSIuNjAyIiBkPSJNMTYuNDk4IDR2OC44N2w3LjQ5NyAzLjM1eiIvPjxwYXRoIGQ9Ik0xNi40OTggNEw5IDE2LjIybDcuNDk4LTMuMzV6Ii8+PHBhdGggZmlsbC1vcGFjaXR5PSIuNjAyIiBkPSJNMTYuNDk4IDIxLjk2OHY2LjAyN0wyNCAxNy42MTZ6Ii8+PHBhdGggZD0iTTE2LjQ5OCAyNy45OTV2LTYuMDI4TDkgMTcuNjE2eiIvPjxwYXRoIGZpbGwtb3BhY2l0eT0iLjIiIGQ9Ik0xNi40OTggMjAuNTczbDcuNDk3LTQuMzUzLTcuNDk3LTMuMzQ4eiIvPjxwYXRoIGZpbGwtb3BhY2l0eT0iLjYwMiIgZD0iTTkgMTYuMjJsNy40OTggNC4zNTN2LTcuNzAxeiIvPjwvZz48L2c+PC9zdmc+", "btc": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNiIgZmlsbD0iI0Y3OTMxQSIvPjxwYXRoIGZpbGw9IiNGRkYiIGZpbGwtcnVsZT0ibm9uemVybyIgZD0iTTIzLjE4OSAxNC4wMmMuMzE0LTIuMDk2LTEuMjgzLTMuMjIzLTMuNDY1LTMuOTc1bC43MDgtMi44NC0xLjcyOC0uNDMtLjY5IDIuNzY1Yy0uNDU0LS4xMTQtLjkyLS4yMi0xLjM4NS0uMzI2bC42OTUtMi43ODNMMTUuNTk2IDZsLS43MDggMi44MzljLS4zNzYtLjA4Ni0uNzQ2LS4xNy0xLjEwNC0uMjZsLjAwMi0uMDA5LTIuMzg0LS41OTUtLjQ2IDEuODQ2czEuMjgzLjI5NCAxLjI1Ni4zMTJjLjcuMTc1LjgyNi42MzguODA1IDEuMDA2bC0uODA2IDMuMjM1Yy4wNDguMDEyLjExLjAzLjE4LjA1N2wtLjE4My0uMDQ1LTEuMTMgNC41MzJjLS4wODYuMjEyLS4zMDMuNTMxLS43OTMuNDEuMDE4LjAyNS0xLjI1Ni0uMzEzLTEuMjU2LS4zMTNsLS44NTggMS45NzggMi4yNS41NjFjLjQxOC4xMDUuODI4LjIxNSAxLjIzMS4zMThsLS43MTUgMi44NzIgMS43MjcuNDMuNzA4LTIuODRjLjQ3Mi4xMjcuOTMuMjQ1IDEuMzc4LjM1N2wtLjcwNiAyLjgyOCAxLjcyOC40My43MTUtMi44NjZjMi45NDguNTU4IDUuMTY0LjMzMyA2LjA5Ny0yLjMzMy43NTItMi4xNDYtLjAzNy0zLjM4NS0xLjU4OC00LjE5MiAxLjEzLS4yNiAxLjk4LTEuMDAzIDIuMjA3LTIuNTM4em0tMy45NSA1LjUzOGMtLjUzMyAyLjE0Ny00LjE0OC45ODYtNS4zMi42OTVsLjk1LTMuODA1YzEuMTcyLjI5MyA0LjkyOS44NzIgNC4zNyAzLjExem0uNTM1LTUuNTY5Yy0uNDg3IDEuOTUzLTMuNDk1Ljk2LTQuNDcuNzE3bC44Ni0zLjQ1Yy45NzUuMjQzIDQuMTE4LjY5NiAzLjYxIDIuNzMzeiIvPjwvZz48L3N2Zz4=", "dai": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxjaXJjbGUgZmlsbD0iI0Y0QjczMSIgZmlsbC1ydWxlPSJub256ZXJvIiBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiLz48cGF0aCBkPSJNOS4yNzcgOGg2LjU1MmMzLjk4NSAwIDcuMDA2IDIuMTE2IDguMTMgNS4xOTRIMjZ2MS44NjFoLTEuNjExYy4wMzEuMjk0LjA0Ny41OTQuMDQ3Ljg5OHYuMDQ2YzAgLjM0Mi0uMDIuNjgtLjA2IDEuMDFIMjZ2MS44NmgtMi4wOEMyMi43NjcgMjEuOTA1IDE5Ljc3IDI0IDE1LjgzIDI0SDkuMjc3di01LjEzMUg3di0xLjg2aDIuMjc3di0xLjk1NEg3di0xLjg2aDIuMjc3Vjh6bTEuODMxIDEwLjg2OXYzLjQ2Mmg0LjcyYzIuOTE0IDAgNS4wNzgtMS4zODcgNi4wODUtMy40NjJIMTEuMTA4em0xMS4zNjYtMS44NkgxMS4xMDh2LTEuOTU0aDExLjM3Yy4wNDEuMzA3LjA2My42MjIuMDYzLjk0NHYuMDQ1YzAgLjMyOS0uMDIzLjY1LS4wNjcuOTY0ek0xNS44MyA5LjY2NWMyLjkyNiAwIDUuMDk3IDEuNDI0IDYuMDk4IDMuNTI4aC0xMC44MlY5LjY2Nmg0LjcyeiIgZmlsbD0iI0ZGRiIvPjwvZz48L3N2Zz4=", "arb": "data:image/webp;base64,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", "etherscan": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIzIiBoZWlnaHQ9IjEyMyIgdmlld0JveD0iMCAwIDEyMyAxMjMiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+DQo8cGF0aCBkPSJNMjUuNzkgNTguNDE0OUMyNS43OTAxIDU3LjczNTcgMjUuOTI0NCA1Ny4wNjMzIDI2LjE4NTEgNTYuNDM2MUMyNi40NDU4IDU1LjgwOSAyNi44Mjc4IDU1LjIzOTYgMjcuMzA5MiA1NC43NjA1QzI3Ljc5MDcgNTQuMjgxNCAyOC4zNjE5IDUzLjkwMjEgMjguOTkwMyA1My42NDQ0QzI5LjYxODcgNTMuMzg2NyAzMC4yOTE4IDUzLjI1NTcgMzAuOTcxIDUzLjI1ODlMMzkuNTYxIDUzLjI4NjlDNDAuOTMwNSA1My4yODY5IDQyLjI0NCA1My44MzEgNDMuMjEyNCA1NC43OTk0QzQ0LjE4MDkgNTUuNzY3OCA0NC43MjUgNTcuMDgxMyA0NC43MjUgNTguNDUwOVY5MC45MzA5QzQ1LjY5MiA5MC42NDM5IDQ2LjkzNCA5MC4zMzc5IDQ4LjI5MyA5MC4wMTc5QzQ5LjIzNyA4OS43OTYyIDUwLjA3ODMgODkuMjYyIDUwLjY4MDUgODguNTAxOUM1MS4yODI2IDg3Ljc0MTggNTEuNjEwMiA4Ni44MDA2IDUxLjYxIDg1LjgzMDlWNDUuNTQwOUM1MS42MSA0NC4xNzEyIDUyLjE1NCA0Mi44NTc2IDUzLjEyMjQgNDEuODg5QzU0LjA5MDggNDAuOTIwNCA1NS40MDQzIDQwLjM3NjIgNTYuNzc0IDQwLjM3NTlINjUuMzgxQzY2Ljc1MDYgNDAuMzc2MiA2OC4wNjQxIDQwLjkyMDQgNjkuMDMyNSA0MS44ODlDNzAuMDAwOSA0Mi44NTc2IDcwLjU0NSA0NC4xNzEyIDcwLjU0NSA0NS41NDA5VjgyLjkzMzlDNzAuNTQ1IDgyLjkzMzkgNzIuNyA4Mi4wNjE5IDc0Ljc5OSA4MS4xNzU5Qzc1LjU3ODcgODAuODQ2MiA3Ni4yNDQxIDgwLjI5NDEgNzYuNzEyMiA3OS41ODg2Qzc3LjE4MDMgNzguODgzMiA3Ny40MzAyIDc4LjA1NTUgNzcuNDMxIDc3LjIwODlWMzIuNjMwOUM3Ny40MzEgMzEuMjYxNSA3Ny45NzQ5IDI5Ljk0ODEgNzguOTQzMSAyOC45Nzk3Qzc5LjkxMTMgMjguMDExMyA4MS4yMjQ1IDI3LjQ2NzIgODIuNTkzOSAyNy40NjY5SDkxLjIwMUM5Mi41NzA2IDI3LjQ2NjkgOTMuODg0IDI4LjAxMDkgOTQuODUyNSAyOC45Nzk0Qzk1LjgyMDkgMjkuOTQ3OCA5Ni4zNjUgMzEuMjYxMyA5Ni4zNjUgMzIuNjMwOVY2OS4zMzk5QzEwMy44MjcgNjMuOTMxOSAxMTEuMzg5IDU3LjQyNzkgMTE3LjM5IDQ5LjYwNjlDMTE4LjI2MSA0OC40NzE3IDExOC44MzcgNDcuMTM4NiAxMTkuMDY3IDQ1LjcyNjdDMTE5LjI5NyA0NC4zMTQ4IDExOS4xNzQgNDIuODY3OCAxMTguNzA5IDQxLjUxNDlDMTE1LjkzMSAzMy41MjI3IDExMS41MTYgMjYuMTk4MyAxMDUuNzQ1IDIwLjAxMDVDOTkuOTc0IDEzLjgyMjggOTIuOTc0OSA4LjkwNzg1IDg1LjE5NTUgNS41ODAzMkM3Ny40MTYxIDIuMjUyOCA2OS4wMjc3IDAuNTg1OTM4IDYwLjU2NzEgMC42ODY0MTZDNTIuMTA2NSAwLjc4Njg5MyA0My43NjAxIDIuNjUyNSAzNi4wNjIgNi4xNjM4M0MyOC4zNjM4IDkuNjc1MTcgMjEuNDgzNCAxNC43NTQ5IDE1Ljg2MTEgMjEuMDc4QzEwLjIzODggMjcuNDAxIDUuOTk4NDIgMzQuODI4MiAzLjQxMTMxIDQyLjg4NDJDMC44MjQyMDcgNTAuOTQwMSAtMC4wNTI2NDg3IDU5LjQ0NzQgMC44MzY4NTEgNjcuODYxN0MxLjcyNjM1IDc2LjI3NiA0LjM2MjYzIDg0LjQxMTkgOC41NzY5NiA5MS43NDg5QzkuMzExMTEgOTMuMDE0NSAxMC4zOTEyIDk0LjA0NDQgMTEuNjkwMyA5NC43MTc1QzEyLjk4OTQgOTUuMzkwNiAxNC40NTM2IDk1LjY3OSAxNS45MTEgOTUuNTQ4OUMxNy41MzkgOTUuNDA1OSAxOS41NjYgOTUuMjAyOSAyMS45NzYgOTQuOTE5OUMyMy4wMjUxIDk0LjgwMDggMjMuOTkzNyA5NC4yOTk5IDI0LjY5NzIgOTMuNTEyNkMyNS40MDA4IDkyLjcyNTMgMjUuNzkwMSA5MS43MDY3IDI1Ljc5MSA5MC42NTA5TDI1Ljc5IDU4LjQxNDlaIiBmaWxsPSIjMjEzMjVCIi8+DQo8cGF0aCBkPSJNMjUuNjAyMSAxMTAuNTFDMzQuNjc0NCAxMTcuMTEgNDUuMzk1OSAxMjEuMDcyIDU2LjU4MDIgMTIxLjk1N0M2Ny43NjQ2IDEyMi44NDEgNzguOTc1NyAxMjAuNjE1IDg4Ljk3MzEgMTE1LjUyM0M5OC45NzA1IDExMC40MzEgMTA3LjM2NCAxMDIuNjczIDExMy4yMjYgOTMuMTA2OEMxMTkuMDg3IDgzLjU0MDUgMTIyLjE4OCA3Mi41MzkgMTIyLjE4NSA2MS4zMTk3QzEyMi4xODUgNTkuOTE5NyAxMjIuMTIgNTguNTM0NyAxMjIuMDI3IDU3LjE1NzdDOTkuODA4IDkwLjI5NTcgNTguNzgzMSAxMDUuNzg4IDI1LjYwNCAxMTAuNTA1IiBmaWxsPSIjOTc5Njk1Ii8+DQo8L3N2Zz4NCg==", "coingecko": "data:image/png;base64,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"};
+  var L = {
+    frames: document.getElementById('layer-frames'), edges: document.getElementById('layer-edges'),
+    nodes: document.getElementById('layer-nodes'),
+    legend: document.getElementById('layer-legend'), fx: document.getElementById('layer-fx'), pkts: document.getElementById('layer-pkts')
+  };
+  function el(name, attrs, parent) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function txt(parent, x, y, s, cls, anchor) {
+    var t = el('text', { x: x, y: y, 'class': cls || '' }, parent);
+    if (anchor) t.setAttribute('text-anchor', anchor);
+    t.textContent = s;
+    return t;
+  }
+  function icon(parent, key, x, y, size) {
+    if (!ICONS[key]) return null;
+    var im = el('image', { x: x, y: y, width: size, height: size, href: ICONS[key] }, parent);
+    im.setAttributeNS(XL, 'xlink:href', ICONS[key]);
+    return im;
+  }
+  // a lettered mark where no logo is available
+  function mark(parent, letter, color, x, y, size) {
+    var g = el('g', {}, parent);
+    el('circle', { cx: x + size / 2, cy: y + size / 2, r: size / 2, fill: color }, g);
+    var t = txt(g, x + size / 2, y + size / 2 + size * 0.36, letter, '', 'middle');
+    t.setAttribute('fill', '#fff'); t.setAttribute('font-size', size * 0.62); t.setAttribute('font-weight', '700');
+    return g;
+  }
+  function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ','); }
+  var timers = [];
+  function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
+
+  // ---- code samples: a little colour ----------------------------------------------
+  Array.prototype.forEach.call(document.querySelectorAll('.sample pre'), function (pre) {
+    var src = pre.textContent;
+    var out = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    out = out.replace(/(\/\/[^\n]*|--[^\n]*)/g, '<span class="c">$1</span>');
+    out = out.replace(/(^|\n)(#\[[^\]]*\])/g, '$1<span class="a">$2</span>');
+    out = out.replace(/\b(async|fn|let|loop|match|else|return|struct|mut|await|move|use|if|for|in|continue|SELECT|FROM|WHERE|ORDER BY|DESC|LIMIT)\b/g, '<span class="k">$1</span>');
+    out = out.replace(/\b(t\.(?:emit|calls|call|call_at|spawn|created|creation|facts|merge|logs|poll|block))\b/g, '<span class="t">$1</span>');
+    out = out.replace(/\b([A-Z][A-Za-z0-9]*(?:Call)?)\b(?![^<]*<\/span>)/g, '<span class="s">$1</span>');
+    pre.innerHTML = out;
+  });
+
+  // ---- geometry: five rows, read top to bottom -------------------------------------
+  var CARD = { w: 156, h: 62 };
+  var COLX = [20, 204, 388, 572], ROWY = [52, 150];                 // the graph of kinds you write
+  var RD = { x: 740, y: 52, w: 140, h: 160 };                        // what you read
+  var IX = { x: 20, y: 240, w: 860, h: 210 };                        // the indexer
+  var ST = { x: 530, y: 480, w: 350, h: 100 };                       // the persistent store
+  var FZ = { y: 600, h: 140 };                                       // the fetch layer: work to do + planner
+  var WK = { x: 20, y: FZ.y, w: 280, h: FZ.h };
+  var PL = { x: 320, y: FZ.y, w: 560, h: FZ.h };
+  var SRC_Y = 790, SRC_W = 120, SRC_H = 48, SRC_STEP = 144;          // the sources, by chain
+
+  txt(L.frames, 20, 40, 'you write', 'frame-t');
+  txt(L.frames, RD.x, 40, 'you read', 'frame-t');
+  txt(L.frames, 20, 592, 'fetch layer', 'frame-t');
+
+  // ---- nodes ---------------------------------------------------------------
+  var N = {};
+  function node(n) {
+    var g = el('g', { 'class': 'node ' + n.cls, id: n.id }, L.nodes);
+    el('rect', { 'class': 'box', x: n.x, y: n.y, width: n.w, height: n.h, rx: 6 }, g);
+    if (n.t) txt(g, n.x + 12, n.y + 18, n.t, 't');
+    (n.s || []).forEach(function (line, i) { txt(g, n.x + 12, n.y + 33 + i * 13, line, 's'); });
+    n.codeEls = (n.code || []).map(function (line, i) { return txt(g, n.x + 12, n.y + 33 + i * 12, line, 'c'); });
+    if (n.ver) n.verEl = txt(g, n.x + n.w - 12, n.y + 18, n.ver, 'ver', 'end');
+    N[n.id] = g; n.g = g;
+    return g;
+  }
+  // kinds, in the order of the indexer's groups; col/row place the card in the graph
+  var kinds = [
+    { id: 'k_disc', name: 'discovery', per: 'API', count: 1, lanes: [['/contracts', null]], p: 0.08, col: 0, row: 0, fact: 'Discovered',
+      code: ['polls GET /contracts', 'where was it created?', 'spawn::<TokenTransfers>'] },
+    { id: 'k_transfers', name: 'token_transfers', per: 'token', count: 1240, lanes: [['USDC', 'usdc'], ['WETH', 'eth'], ['DAI', 'dai'], ['ARB', 'arb']], p: 0.3, col: 1, row: 0, fact: 'Transfer',
+      code: ['every Transfer log', 'state.balance[to] += v', 'emit(Transfer { .. })'] },
+    { id: 'k_prices', name: 'token_prices', per: 'token', count: 80, lanes: [['ETH', 'eth'], ['BTC', 'btc'], ['USDC', 'usdc']], p: 0.1, col: 2, row: 1, fact: 'Price',
+      code: ['HTTP price API, 1/min', 'emit(Price { .. })'] },
+    { id: 'k_priced', name: 'priced_transfers', per: 'token', count: 1240, lanes: [['USDC', 'usdc'], ['WETH', 'eth'], ['DAI', 'dai']], p: 0.25, col: 2, row: 0, fact: 'PricedTransfer',
+      code: ['Transfer facts + Price', 'facts, in block order', 'emit(PricedTransfer)'] },
+    { id: 'k_tvl', name: 'pool_tvl', per: 'pool', count: 300, lanes: [['ETH/USDC', 'eth'], ['WBTC/ETH', 'btc'], ['DAI/USDC', 'dai']], p: 0.12, col: 3, row: 0, fact: 'PoolTvl',
+      code: ['every 15 min, each pool', 'calls((supply,balance))', 'emit(PoolTvl { .. })'] }
+  ];
+  var K = {};
+  kinds.forEach(function (k, i) {
+    k.x = COLX[k.col]; k.y = ROWY[k.row]; k.cx = k.x + CARD.w / 2;
+    var spec = { id: k.id, cls: 'track', x: k.x, y: k.y, w: CARD.w, h: CARD.h, t: k.name, code: k.code, ver: 'v1' };
+    node(spec);
+    k.node = N[k.id]; k.codeEls = spec.codeEls; k.verEl = spec.verEl; k.gi = i; K[k.id] = k;
+  });
+  var reader = node({ id: 'reader', cls: 'reader', x: RD.x, y: RD.y, w: RD.w, h: RD.h, t: 'facts, as tables', s: ['Delta or Postgres', 'DuckDB · Polars · SQL'] });
+  var rowsG = el('g', { 'class': 'rows' }, reader);
+  txt(rowsG, RD.x + 12, RD.y + 60, 'SELECT * FROM transfer', 'q');
+  node({ id: 'indexer', cls: 'indexer', x: IX.x, y: IX.y, w: IX.w, h: IX.h, t: 'indexer', s: ['one track per contract, each with its own cursor'] });
+  node({ id: 'store', cls: 'store', x: ST.x, y: ST.y, w: ST.w, h: ST.h, t: 'persistent store' });
+  node({ id: 'archive', cls: 'store', x: ST.x + 10, y: ST.y + 28, w: 168, h: 64, t: 'archive', s: ['every log, call answer,', 'header and HTTP answer', 'ever fetched, by key'] });
+  node({ id: 'journal', cls: 'store', x: ST.x + 186, y: ST.y + 28, w: 154, h: 64, t: 'journal', s: ['each track’s state', 'and cursor, committed', 'with its facts'] });
+  node({ id: 'work', cls: 'fetch', x: WK.x, y: WK.y, w: WK.w, h: WK.h, t: 'work to do' });
+  node({ id: 'planner', cls: 'fetch', x: PL.x, y: PL.y, w: PL.w, h: PL.h, t: 'planner', s: ['packs the work, picks the source'] });
+
+  // sources, by chain; each of a type, with its rate and its own lag behind that chain's head
+  var chains = [
+    { id: 'c1', label: 'Ethereum', ic: 'eth', x: 14, w: 420 },
+    { id: 'c2', label: 'Arbitrum', ic: 'arb', x: 446, w: 276 },
+    { id: 'c0', label: 'off-chain', x: 734, w: 132 }
+  ];
+  var sources = [
+    { id: 's1', t: 'QuickNode', tag: 'rpc · free', tag2: '5/s · −0 behind', mark: ['Q', '#00a0d8'] },
+    { id: 's2', t: 'Etherscan', tag: 'explorer · free', tag2: '−12 behind', ic: 'etherscan' },
+    { id: 's3', t: 'provider', tag: 'rpc · $0.001', tag2: 'no limit · −0', glyph: 'dollar', cls: 'money' },
+    { id: 's4', t: 'QuickNode', tag: 'rpc · free', tag2: '25/s · −1 behind', mark: ['Q', '#00a0d8'] },
+    { id: 's5', t: 'Blockscout', tag: 'explorer · free', tag2: '−6 behind', mark: ['B', '#3b6ff5'] },
+    { id: 's6', t: 'CoinGecko', tag: 'http · free', tag2: 'every minute', ic: 'coingecko' }
+  ];
+  chains.forEach(function (c) {
+    el('rect', { 'class': 'chain', x: c.x, y: SRC_Y - 10, width: c.w, height: SRC_H + 36, rx: 8 }, L.frames);
+    var lx = c.x + c.w / 2 + (c.ic ? 8 : 0);
+    txt(L.frames, lx, SRC_Y + SRC_H + 18, c.label, 'frame-t', 'middle');
+    if (c.ic) icon(L.frames, c.ic, lx - c.label.length * 3.6 - 20, SRC_Y + SRC_H + 8, 13);
+  });
+  sources.forEach(function (n, i) {
+    n.x = 20 + i * SRC_STEP; n.y = SRC_Y; n.w = SRC_W; n.h = SRC_H;
+    var g = node({ id: n.id, cls: 'src ' + (n.cls || ''), x: n.x, y: n.y, w: n.w, h: n.h });
+    var gx = n.x + 8, gy = n.y + 8;
+    if (n.ic) icon(g, n.ic, gx, gy, 18);
+    else if (n.mark) mark(g, n.mark[0], n.mark[1], gx, gy, 18);
+    else if (n.glyph === 'dollar') {
+      el('rect', { 'class': 'glyph', x: gx, y: gy + 1, width: 16, height: 6, rx: 1.5 }, g);
+      el('rect', { 'class': 'glyph', x: gx, y: gy + 10, width: 16, height: 6, rx: 1.5 }, g);
+      var d = txt(g, gx + 19, gy + 14, '$', 'ver'); d.setAttribute('font-size', '11');
+    }
+    txt(g, n.x + 32, n.y + 17, n.t, 't');
+    txt(g, n.x + 32, n.y + 29, n.tag, 'tag');
+    txt(g, n.x + 32, n.y + 40, n.tag2, 'tag');
+    el('circle', { 'class': 'dot', cx: n.x + 16, cy: n.y + 38, r: 3 }, g);
+    el('rect', { 'class': 'meter', x: n.x + 32, y: n.y + 44, width: n.w - 42, height: 2, rx: 1 }, g);
+    el('rect', { 'class': 'meter-live', x: n.x + 32, y: n.y + 44, width: (n.w - 42) * 0.1, height: 2, rx: 1 }, g);
+    el('rect', { 'class': 'meter-fill', x: n.x + 32 + (n.w - 42) * 0.1, y: n.y + 44, width: 0, height: 2, rx: 1, id: n.id + '_fill' }, g);
+  });
+  var sx = function (id) { var n = sources.filter(function (s) { return s.id === id; })[0]; return n.x + n.w / 2; };
+
+  // ---- edges ---------------------------------------------------------------
+  var E = {};
+  function edge(e, parent) {
+    var g = el('g', { 'class': 'edge' + (e.dash ? ' dash' : ''), id: e.id }, parent || L.edges);
+    el('path', { d: e.d, 'marker-end': 'url(#arrow)' }, g);
+    if (e.label) txt(g, e.lx, e.ly, e.label, '', e.anchor || 'start');
+    E[e.id] = { g: g, d: e.d };
+  }
+  // the graph of kinds (the words ride on the packets; the gaps are too narrow for labels)
+  var kd = K.k_disc, kt = K.k_transfers, kp = K.k_prices, kq = K.k_priced, kv = K.k_tvl;
+  edge({ id: 'e_spawn', d: 'M' + (kd.x + CARD.w + 2) + ',' + (kd.y + 31) + ' L' + (kt.x - 2) + ',' + (kt.y + 31), dash: true, label: 'spawns', lx: (kd.x + CARD.w + kt.x) / 2, ly: 44, anchor: 'middle' });
+  edge({ id: 'e_tr', d: 'M' + (kt.x + CARD.w + 2) + ',' + (kt.y + 31) + ' L' + (kq.x - 2) + ',' + (kq.y + 31), label: 'Transfer', lx: (kt.x + CARD.w + kq.x) / 2, ly: 44, anchor: 'middle' });
+  edge({ id: 'e_pr', d: 'M' + kp.cx + ',' + (kp.y - 2) + ' L' + kp.cx + ',' + (kq.y + CARD.h + 2), label: 'Price', lx: kp.cx + 8, ly: kq.y + CARD.h + 22 });
+  // what the exposed cards ask the indexer, and get back
+  [kd, kt, kp, kv].forEach(function (k) {
+    var top = k.y + CARD.h + 2, bot = IX.y - 2;
+    edge({ id: 'e_ask_' + k.id, d: 'M' + (k.cx - 14) + ',' + top + ' L' + (k.cx - 14) + ',' + bot });
+    edge({ id: 'e_get_' + k.id, d: 'M' + (k.cx + 14) + ',' + bot + ' L' + (k.cx + 14) + ',' + top });
+  });
+  var rcx = RD.x + RD.w / 2;
+  edge({ id: 'e_facts', d: 'M' + rcx + ',' + (IX.y - 2) + ' L' + rcx + ',' + (RD.y + RD.h + 2), label: 'facts', lx: rcx + 8, ly: IX.y - 12 });
+  var ixb = IX.y + IX.h + 2;
+  [
+    { id: 'e_store', d: 'M600,' + ixb + ' L600,' + (ST.y - 2), label: 'fetched', lx: 606, ly: 468 },
+    { id: 'e_replay', d: 'M700,' + (ST.y - 2) + ' L700,' + ixb, label: 'replay', lx: 706, ly: 468, dash: true },
+    { id: 'e_state', d: 'M800,' + ixb + ' L800,' + (ST.y - 2), label: 'state', lx: 806, ly: 468 },
+    { id: 'e_need', d: 'M160,' + ixb + ' L160,' + (WK.y - 2), label: 'needs', lx: 166, ly: 520 },
+    { id: 'e_ans', d: 'M400,' + (PL.y - 2) + ' L400,' + ixb, label: 'answers', lx: 406, ly: 520 }
+  ].forEach(function (e) { edge(e); });
+  sources.forEach(function (s, i) {
+    edge({ id: 'e_req' + (i + 1), d: 'M' + sx(s.id) + ',' + (PL.y + PL.h + 2) + ' L' + sx(s.id) + ',' + (SRC_Y - 2), dash: s.cls === 'money' });
+  });
+  var ret = {};
+  sources.forEach(function (s) { ret[s.id] = 'M' + (sx(s.id) + 8) + ',' + (SRC_Y - 2) + ' L' + (sx(s.id) + 8) + ',' + (PL.y + PL.h + 2); });
+
+  // ---- the indexer: a group of lanes per kind, side by side, one lane per contract ----
+  var CELLS = 11, CUR = 7, CW = 10;
+  // what the cells mean
+  (function () {
+    var lx = IX.x + IX.w - 12, ly = IX.y + 16;
+    var items = [['ahead', 'cell future'], ['cursor', 'cell cur'], ['has a log', 'cell log'], ['done', 'cell past']];
+    var g = el('g', { 'class': 'grp' }, N.indexer);
+    items.forEach(function (it) {
+      var w = it[0].length * 6 + 16;
+      txt(g, lx, ly + 7, it[0], 'l', 'end');
+      el('rect', { 'class': it[1], x: lx - w, y: ly, width: 9, height: 9, rx: 1.5 }, g);
+      lx -= w + 10;
+    });
+  })();
+  var allLanes = [];
+  var groups = kinds.map(function (k, gi) {
+    var gx = 20 + gi * 172, y = IX.y + 50;
+    var g = el('g', { 'class': 'grp', id: 'grp' + gi }, N.indexer);
+    txt(g, gx + 6, y + 8, k.name, 'h');
+    k.verEl2 = txt(g, gx + 6 + k.name.length * 6.6 + 6, y + 8, 'v1', 'ver');
+    var x0 = gx + 56;
+    var lanes = k.lanes.map(function (lane_, li) {
+      var name = lane_[0], ic = lane_[1];
+      var ly = y + 16 + li * 12;
+      var lg = el('g', { 'class': 'lane' }, g);
+      if (ic && ICONS[ic]) { icon(lg, ic, x0 - 14, ly - 0.5, 10); txt(lg, x0 - 17, ly + 8, name, 'l', 'end'); }
+      else txt(lg, x0 - 4, ly + 8, name, 'l', 'end');
+      var cells = [], logs = [], orph = [];
+      for (var c = 0; c < CELLS; c++) {
+        cells.push(el('rect', { 'class': 'cell', x: x0 + c * CW, y: ly, width: CW - 1, height: 9, rx: 1.5 }, lg));
+        logs.push(Math.random() < k.p); orph.push(false);
+      }
+      var lane = { gi: gi, li: li, g: lg, cells: cells, logs: logs, orph: orph, cur: CUR, p: k.p, extra: li === 3 };
+      lane.render = function () {
+        for (var c = 0; c < CELLS; c++) {
+          var cls = 'cell ';
+          if (orph[c]) cls += 'orphan';
+          else if (c < lane.cur) cls += logs[c] ? 'log' : 'past';
+          else if (c === lane.cur) cls += 'cur';
+          else cls += 'future';
+          cells[c].setAttribute('class', cls);
+        }
+      };
+      lane.render();
+      if (lane.extra) lg.style.opacity = '0';
+      allLanes.push(lane);
+      return lane;
+    });
+    var ny = y + 16 + k.lanes.length * 12;
+    txt(g, x0 + CELLS * CW - 1, ny + 14, (k.count > 3 ? '+ ' + fmt(k.count - 3) + ' more · ' : '') + 'one per ' + k.per, 'more', 'end');
+    var barBg = el('rect', { 'class': 'bar-bg', x: x0, y: ny + 2, width: CELLS * CW - 1, height: 3, rx: 1.5 }, g);
+    var bar = el('rect', { 'class': 'bar', x: x0, y: ny + 2, width: 0, height: 3, rx: 1.5 }, g);
+    barBg.setAttribute('opacity', '0'); bar.setAttribute('opacity', '0');
+    return { g: g, lanes: lanes, barBg: barBg, bar: bar, kind: k };
+  });
+  var paused = false;
+  var onLog = null;
+  function tickLanes() {
+    if (paused) return;
+    allLanes.forEach(function (lane) {
+      if (lane.extra && lane.g.style.opacity === '0') return;
+      if (lane.cur < CUR) { lane.cur++; }
+      else { lane.logs.shift(); lane.logs.push(Math.random() < lane.p); lane.orph.shift(); lane.orph.push(false); }
+      lane.render();
+      if (lane.li === 0 && lane.logs[lane.cur - 1] && onLog) onLog(lane);
+    });
+  }
+  setInterval(tickLanes, 480);
+  function setBar(gi, on, w) {
+    var g = groups[gi];
+    g.barBg.setAttribute('opacity', on ? '1' : '0'); g.bar.setAttribute('opacity', on ? '1' : '0');
+    g.bar.setAttribute('width', w || 0);
+  }
+  var extraLane = groups[1].lanes[3];
+
+  // ---- the fetch layer: the pile in the work box, the packer and two counters in the planner --
+  var pile = [];
+  var pileArea = { x0: WK.x + 16, x1: WK.x + WK.w - 16, y0: WK.y + 40, y1: WK.y + WK.h - 36 };
+  var needsT = txt(N.work, WK.x + 12, WK.y + 31, 'needs waiting: 0', 'counter');
+  function addDot(cls) {
+    var x = pileArea.x0 + Math.random() * (pileArea.x1 - pileArea.x0);
+    var y = pileArea.y0 + Math.random() * (pileArea.y1 - pileArea.y0);
+    var c = el('circle', { 'class': 'pdot ' + cls, cx: x, cy: y, r: 3.2 }, L.fx);
+    pile.push({ el: c, cls: cls, x: x, y: y });
+    needsT.textContent = 'needs waiting: ' + fmt(pile.length * 30);
+  }
+  function clearPile() { pile.forEach(function (d) { if (d.el.parentNode) d.el.parentNode.removeChild(d.el); }); pile = []; needsT.textContent = 'needs waiting: 0'; }
+  // the two requests being packed: their contents count up as needs land in them
+  var packed = [
+    { id: 'p1', y: PL.y + 44, unit: 'addresses', head: 'log window', per: 12, n: 0 },
+    { id: 'p2', y: PL.y + 74, unit: 'calls', head: 'multicall', per: 8, n: 0 }
+  ];
+  var PK = {};
+  packed.forEach(function (p) {
+    var g = el('g', { 'class': 'packed', id: p.id }, N.planner);
+    el('rect', { x: PL.x + 12, y: p.y, width: 250, height: 22, rx: 4 }, g);
+    p.label = txt(g, PL.x + 20, p.y + 15, '');
+    PK[p.id] = { g: g, cx: PL.x + 137, cy: p.y + 11, p: p };
+    setPacked(p, 0);
+  });
+  function setPacked(p, n) { p.n = n; p.label.textContent = n ? '1 ' + p.head + ' · ' + fmt(n) + ' ' + p.unit + ', so far' : 'next ' + p.head + ': empty'; }
+  var reqT = txt(N.planner, PL.x + 290, PL.y + 58, 'requests sent: 0', 'counter big');
+  txt(N.planner, PL.x + 290, PL.y + 76, 'spent $0.00 of $0.00 budget', 'counter');
+  txt(N.planner, PL.x + 290, PL.y + 94, 'your rates: never exceeded', 'counter');
+  function tween(dot, tx, ty, ms, done) {
+    var x0 = dot.x, y0 = dot.y, t0 = null;
+    function step(ts) {
+      if (t0 === null) t0 = ts;
+      var k = Math.min(1, (ts - t0) / ms); k = k * k * (3 - 2 * k);
+      dot.el.setAttribute('cx', x0 + (tx - x0) * k); dot.el.setAttribute('cy', y0 + (ty - y0) * k);
+      if (k < 1) requestAnimationFrame(step); else done();
+    }
+    requestAnimationFrame(step);
+  }
+  function packPile() {
+    var dots = pile; pile = [];
+    dots.forEach(function (d, i) {
+      var target = d.cls === 'live' ? PK.p2 : PK.p1;
+      later(function () {
+        tween(d, target.cx + (Math.random() - 0.5) * 200, target.cy, 600, function () {
+          if (d.el.parentNode) d.el.parentNode.removeChild(d.el);
+          setPacked(target.p, target.p.n + target.p.per);
+          target.g.classList.add('on');
+        });
+      }, (i % 12) * 40);
+    });
+    later(function () { needsT.textContent = 'needs waiting: 0'; }, 800);
+  }
+  function sendPacked(count) {
+    reqT.textContent = 'requests sent: ' + count;
+    packed.forEach(function (p) { setPacked(p, 0); PK[p.id].g.classList.remove('on'); });
+  }
+
+  // ---- legend, in the work box ---------------------------------------------------
+  [['live', 'live'], ['backfill', 'backfill'], ['spec', 'speculative']].forEach(function (pair, i) {
+    var x = WK.x + 16 + i * 84;
+    el('circle', { cx: x + 4, cy: WK.y + WK.h - 16, r: 3.5, fill: 'var(--' + pair[0] + ')' }, L.legend);
+    txt(L.legend, x + 12, WK.y + WK.h - 12, pair[1]);
+  });
+
+  // ---- reader rows -------------------------------------------------------------
+  var rows = [];
+  function layoutRows() { rows.forEach(function (r, i) { r.g.setAttribute('transform', 'translate(0,' + (RD.y + 68 + i * 13) + ')'); }); }
+  function addRow(kind) {
+    var s = kind === 'Transfer' ? 'Transfer  USDC  ' + (Math.random() * 900 + 1).toFixed(2)
+      : kind === 'PoolTvl' ? 'PoolTvl  ETH/USDC  ' + fmt(Math.floor(Math.random() * 9000 + 1000))
+      : kind === 'PricedTransfer' ? 'PricedTransfer  $' + fmt(Math.floor(Math.random() * 9000 + 100))
+      : kind === 'Discovered' ? 'Discovered  0x9c…07'
+      : 'Price  ETH  ' + (Math.random() * 200 + 3000).toFixed(2);
+    var g = el('g', { 'class': 'rows' }, rowsG);
+    el('rect', { x: RD.x + 10, y: 0, width: RD.w - 20, height: 11, rx: 2 }, g);
+    txt(g, RD.x + 14, 8.5, s);
+    rows.push({ g: g });
+    if (rows.length > 6) { var old = rows.shift(); old.g.parentNode.removeChild(old.g); }
+    layoutRows();
+  }
+  function dropRow() {
+    if (!rows.length) return;
+    var r = rows[rows.length - 1];
+    r.g.classList.add('gone');
+    later(function () { if (r.g.parentNode) r.g.parentNode.removeChild(r.g); rows.pop(); layoutRows(); }, 700);
+  }
+  addRow('Transfer'); addRow('PoolTvl'); addRow('PricedTransfer'); addRow('Transfer');
+
+  // ---- effects -------------------------------------------------------------------
+  function flash(f) {
+    var g = el('g', { 'class': 'flash ' + (f.cls || '') }, L.fx);
+    el('rect', { x: f.x - f.w / 2, y: f.y - 11, width: f.w, height: 18, rx: 4 }, g);
+    txt(g, f.x, f.y + 2, f.text, '', 'middle');
+    later(function () { if (g.parentNode) g.parentNode.removeChild(g); }, f.ms || 2200);
+  }
+  function packet(p) {
+    var d = p.e.indexOf('ret_') === 0 ? ret[p.e.slice(4)] : E[p.e].d;
+    var g = el('g', { 'class': 'pkt ' + p.c }, L.pkts);
+    if (p.l) {
+      var w = p.l.length * 6.2 + 12;
+      el('rect', { 'class': 'lbl', x: 8, y: -8, width: w, height: 15, rx: 3 }, g);
+      txt(g, 8 + w / 2, 3, p.l, '', 'middle');
+    }
+    el('circle', { r: p.r || 5 }, g);
+    var a = el('animateMotion', { dur: p.dur + 's', begin: 'indefinite', fill: 'freeze', path: d, rotate: '0' }, g);
+    g.setAttribute('opacity', '0');
+    later(function () {
+      g.setAttribute('opacity', '1');
+      a.beginElement();
+      later(function () { if (g.parentNode) g.parentNode.removeChild(g); if (p.then) p.then(); }, p.dur * 1000 + 120);
+    }, (p.at || 0) * 1000);
+  }
+  // a packet again and again, with the labels in turn, until the scene ends
+  function stream(s) {
+    var k = 0;
+    function fire() { packet({ e: s.e, c: s.c, l: s.labels ? s.labels[k % s.labels.length] : '', dur: s.dur, r: s.r, then: s.then }); k++; later(fire, s.every); }
+    later(fire, (s.at || 0) * 1000);
+  }
+  function called(id, ms) { N[id].classList.add('called'); later(function () { N[id].classList.remove('called'); }, ms || 350); }
+  function setMeters(m) {
+    for (var id in m) if (Object.prototype.hasOwnProperty.call(m, id)) {
+      var r = document.getElementById(id + '_fill');
+      if (r) r.setAttribute('width', (SRC_W - 42) * 0.9 * m[id]);
+    }
+  }
+  var IDX = { x: 450, y: IX.y + IX.h - 14 };      // where the indexer's notices go (its bottom)
+  var SRC = { x: 450, y: SRC_Y + SRC_H + 46 };     // where the sources' notices go (under the chains)
+  var PLN = { x: PL.x + 420, y: PL.y + 124 };      // the planner's
+  function version(k, v) { k.verEl.textContent = v; k.verEl2.textContent = v; }
+  function factsFromLogs(share) {
+    onLog = function (lane) {
+      if (Math.random() > (share || 1)) return;
+      var k = kinds[lane.gi];
+      called(k.id);
+      packet({ e: 'e_facts', c: 'fact', l: k.fact + (k.id === 'k_tvl' ? ' ×300' : ''), dur: 0.5, then: function () { addRow(k.fact); } });
+    };
+  }
+
+  // ---- scenes, from the base case up -----------------------------------------------------
+  var GRAPH = ['k_disc', 'k_transfers', 'k_prices', 'k_priced', 'k_tvl', 'e_spawn', 'e_tr', 'e_pr'];
+  var ASKS = ['e_ask_k_disc', 'e_get_k_disc', 'e_ask_k_transfers', 'e_get_k_transfers', 'e_ask_k_prices', 'e_get_k_prices', 'e_ask_k_tvl', 'e_get_k_tvl'];
+  var GROUPS = ['grp0', 'grp1', 'grp2', 'grp3', 'grp4'];
+  var scenes = [
+    {
+      name: 'One function per kind of contract',
+      title: 'You write one function per kind of contract. The indexer runs it as one track per contract: every log, in order.',
+      body: 'Here, one function for tokens. The indexer runs it for USDC, for WETH, for DAI, and for 1,237 more, each track with its own cursor. A track asks for the logs it needs (need:log), gets them one at a time, keeps state of its own, and emits facts.',
+      fact: 'async fn token_transfers(t, token, log, state) → emit(Transfer)',
+      on: ['k_transfers', 'e_ask_k_transfers', 'e_get_k_transfers', 'indexer', 'grp1', 'e_facts', 'reader'],
+      run: function () {
+        onLog = function (lane) { if (lane.gi !== 1) return; called('k_transfers'); packet({ e: 'e_facts', c: 'fact', l: 'Transfer', dur: 0.5, then: function () { addRow('Transfer'); } }); };
+        stream({ e: 'e_ask_k_transfers', c: 'backfill', labels: ['need:log'], every: 1400, dur: 0.9, r: 4 });
+        stream({ e: 'e_get_k_transfers', c: 'backfill', labels: ['log'], every: 1400, dur: 0.9, r: 4, at: 0.7 });
+        later(function () { flash({ x: IDX.x, y: IDX.y, w: 250, text: 'one track per token, each with its cursor', cls: 'accent' }); }, 2400);
+        later(function () { flash({ x: RD.x + RD.w / 2, y: RD.y - 12, w: 150, text: 'facts: tables you query', cls: 'accent' }); }, 5600);
+      }
+    },
+    {
+      name: 'Other inputs: ticks, calls, an API',
+      title: 'A track can also be woken by a clock tick and read the chain at that block, or poll an API off chain.',
+      body: 'pool_tvl runs every 15 minutes: the indexer sends it a tick, it asks for calls at that block (need:eth_call) and gets the answers. token_prices asks for an HTTP document (need:api_call), recorded so a replay sees the same answers. The calls of every track at a block go out together.',
+      fact: '#[track(version = 1, emits(PoolTvl), every = 900)]  ·  t.poll(Api::new(&url), every)',
+      on: ['k_tvl', 'k_prices', 'e_ask_k_tvl', 'e_get_k_tvl', 'e_ask_k_prices', 'e_get_k_prices', 'indexer', 'grp2', 'grp4', 'e_facts', 'reader'],
+      run: function () {
+        onLog = function (lane) { if (lane.gi !== 2 && lane.gi !== 4) return; var k = kinds[lane.gi]; called(k.id); packet({ e: 'e_facts', c: 'fact', l: k.fact + (k.id === 'k_tvl' ? ' ×300' : ''), dur: 0.5, then: function () { addRow(k.fact); } }); };
+        stream({ e: 'e_get_k_tvl', c: 'live', labels: ['tick'], every: 2800, dur: 0.9, r: 4, at: 0.3 });
+        stream({ e: 'e_ask_k_tvl', c: 'live', labels: ['need:eth_call ×300'], every: 2800, dur: 0.9, r: 4, at: 1.3 });
+        stream({ e: 'e_get_k_tvl', c: 'live', labels: ['answers'], every: 2800, dur: 0.9, r: 4, at: 2.3 });
+        stream({ e: 'e_ask_k_prices', c: 'live', labels: ['need:api_call GET /prices'], every: 3000, dur: 0.5, r: 4, at: 0.8 });
+        stream({ e: 'e_get_k_prices', c: 'live', labels: ['answer'], every: 3000, dur: 0.5, r: 4, at: 1.5 });
+        later(function () { flash({ x: IDX.x, y: IDX.y, w: 236, text: '300 pools at one tick: one multicall', cls: 'accent' }); }, 3600);
+      }
+    },
+    {
+      name: 'Tracks form a graph',
+      title: 'Tracks form a graph: one can start others, and one can read what others emit.',
+      body: 'discovery polls an API for contracts, asks where each new one was created (need:creation) and spawns a token_transfers track for it. priced_transfers reads the Transfer facts of token_transfers and the Price facts of token_prices, in block order, and emits each transfer with its USD value.',
+      fact: 't.spawn::<TokenTransfers>(token)  ·  t.merge(t.facts::<Transfer>(..), t.facts::<Price>(..))',
+      on: GRAPH.concat(['e_ask_k_disc', 'e_get_k_disc', 'indexer', 'grp0', 'grp1', 'grp2', 'grp3', 'e_facts', 'reader']),
+      run: function () {
+        onLog = function (lane) { if (lane.gi !== 3) return; called('k_priced'); packet({ e: 'e_facts', c: 'fact', l: 'PricedTransfer', dur: 0.5, then: function () { addRow('PricedTransfer'); } }); };
+        stream({ e: 'e_ask_k_disc', c: 'live', labels: ['need:api_call GET /contracts', 'need:creation 0x9c…07'], every: 1800, dur: 0.9, r: 4 });
+        stream({ e: 'e_get_k_disc', c: 'live', labels: ['answer', 'created at #180,221,004'], every: 1800, dur: 0.9, r: 4, at: 1.0 });
+        stream({ e: 'e_spawn', c: 'fact', labels: ['spawn 0x9c…07'], every: 3600, dur: 0.6, r: 4, at: 3.0 });
+        stream({ e: 'e_tr', c: 'fact', labels: ['Transfer'], every: 1400, dur: 0.6, r: 4, at: 0.4 });
+        stream({ e: 'e_pr', c: 'fact', labels: ['Price'], every: 3000, dur: 0.6, r: 4, at: 1.2 });
+        later(function () { flash({ x: K.k_priced.cx, y: K.k_priced.y - 12, w: 210, text: 'each Transfer with its USD value', cls: 'accent' }); }, 3000);
+        later(function () { flash({ x: K.k_disc.cx, y: K.k_disc.y - 12, w: 190, text: 'a new contract: one more track', cls: 'accent' }); }, 6200);
+      }
+    },
+    {
+      name: 'The needs go on one pile',
+      title: 'What the tracks need goes on one pile, with its urgency.',
+      body: 'A need says what (need:log of an address over a range, need:eth_call at a block, need:api_call, need:creation) and how urgent: live, backfill or speculative. Not which source, how big a request, or how fast.',
+      fact: 'need:log  USDC  blocks 180,221,004 → head  ·  class: backfill',
+      on: ['indexer', 'work', 'e_need'].concat(GROUPS),
+      run: function () {
+        var classes = ['backfill', 'live', 'backfill', 'spec', 'live', 'backfill'];
+        var labels = ['need:log USDC', 'need:eth_call ×300', 'need:log WETH', 'need:log, next window', 'need:api_call /prices', 'need:creation 0x9c…07'];
+        for (var k = 0; k < 16; k++) (function (k) {
+          var cls = classes[k % classes.length];
+          packet({ e: 'e_need', c: cls, l: k < 6 ? labels[k] : '', dur: 0.9, at: k * 0.4, then: function () { for (var j = 0; j < 4; j++) addDot(cls); } });
+        })(k);
+      }
+    },
+    {
+      name: 'The planner packs the pile',
+      title: 'The planner packs the pile into as few requests as the sources take, and sends each to the source with the lowest cost.',
+      body: 'A request fills up with whatever waiting work fits it: one log window for every address missing blocks in it, one multicall for every call at a block. Cost is price plus what the wait is worth; by default no money is spent. Trade-off: live work is planned first, a backfill gets what is left.',
+      fact: 'measured: 500 contracts over a million blocks → 159 requests, not 37,500',
+      on: ['work', 'planner', 'p1', 'p2', 's1', 's2', 's3', 's4', 's5', 's6', 'e_req1', 'e_req2', 'e_req3', 'e_req4', 'e_req5', 'e_req6'],
+      run: function () {
+        if (pile.length < 36) { for (var j = pile.length; j < 48; j++) addDot(j % 3 === 1 ? 'live' : (j % 7 === 0 ? 'spec' : 'backfill')); }
+        later(function () { packPile(); }, 500);
+        later(function () {
+          packet({ e: 'e_req1', c: 'backfill', l: '1 window · 500 addresses', dur: 0.9 });
+          packet({ e: 'e_req4', c: 'live', l: '1 multicall · 300 calls', dur: 0.8, at: 0.3 });
+          packet({ e: 'e_req2', c: 'backfill', l: 'whole history of WETH', dur: 1.0, at: 0.8 });
+          packet({ e: 'e_req6', c: 'live', l: 'GET /prices', dur: 0.8, at: 1.2 });
+          sendPacked(7);
+          setMeters({ s1: 0.8, s2: 0.9, s4: 0.5, s6: 0.3 });
+        }, 2200);
+        later(function () { flash({ x: SRC.x, y: SRC.y, w: 190, text: 'provider: no budget, never asked', cls: 'live' }); }, 3400);
+        later(function () { for (var j = 0; j < 30; j++) addDot(j % 4 === 0 ? 'live' : 'backfill'); }, 4200);
+        later(function () { packPile(); }, 5000);
+        later(function () {
+          packet({ e: 'e_req1', c: 'backfill', l: 'batch of 4: rate 5, a tenth kept', dur: 0.9 });
+          packet({ e: 'e_req4', c: 'live', l: 'head', dur: 0.8, at: 0.4 });
+          packet({ e: 'e_req5', c: 'backfill', l: 'logs of DAI, from creation', dur: 1.0, at: 0.7 });
+          sendPacked(14);
+        }, 6600);
+        later(function () { flash({ x: SRC.x, y: SRC.y, w: 150, text: '$0.00 spent', cls: 'good' }); }, 7600);
+      },
+      end: function () { clearPile(); sendPacked(0); setMeters({ s1: 0, s2: 0, s3: 0, s4: 0, s5: 0, s6: 0 }); }
+    },
+    {
+      name: 'Sources are learned, and checked',
+      title: 'Every source is learned by using it, and the log answers of a chain’s sources are checked against each other.',
+      body: 'How big a request, how fast, how deep its history, how far behind the head: from what it accepts, refuses and fails, tested again later. A source whose logs differ is distrusted, and the indexer names the command that repairs what it delivered.',
+      fact: 'trial: three answers read again elsewhere and found the same; then one in twenty',
+      on: ['planner', 's1', 's2', 's3', 's4', 's5', 's6', 'e_req1', 'e_req2', 'e_req4', 'e_req5'],
+      run: function () {
+        packet({ e: 'e_req1', c: 'backfill', l: 'window 10,000', dur: 0.8 });
+        packet({ e: 'ret_s1', c: 'bad', l: 'refused: too big', dur: 0.8, at: 1.0 });
+        later(function () { flash({ x: SRC.x, y: SRC.y, w: 190, text: 'QuickNode: window → 5,000', cls: 'bad' }); }, 2000);
+        packet({ e: 'e_req1', c: 'backfill', l: 'window 5,000', dur: 0.8, at: 2.3 });
+        packet({ e: 'ret_s1', c: 'good', l: 'full answer', dur: 0.8, at: 3.3 });
+        later(function () { flash({ x: SRC.x, y: SRC.y, w: 190, text: 'full answer: window → 8,000', cls: 'good' }); }, 4400);
+        packet({ e: 'e_req2', c: 'backfill', l: 'read again: same logs?', dur: 0.8, at: 1.5 });
+        packet({ e: 'ret_s2', c: 'good', l: 'same ✓ (3 of 3: trusted)', dur: 0.8, at: 2.5 });
+        packet({ e: 'e_req5', c: 'backfill', l: 'read again', dur: 0.8, at: 4.0 });
+        packet({ e: 'ret_s5', c: 'bad', l: 'differs from the node ✗', dur: 0.8, at: 5.2 });
+        later(function () { N.s5.classList.add('distrusted'); flash({ x: SRC.x, y: SRC.y, w: 210, text: 'Blockscout distrusted · source forget', cls: 'bad' }); }, 6500);
+      },
+      end: function () { N.s5.classList.remove('distrusted'); }
+    },
+    {
+      name: 'Restarts and reorgs',
+      title: 'A restart resumes where it was; a reorg rewinds to the fork.',
+      body: 'Nothing of this is in your function. State and cursor are committed together, so a killed process resumes without a gap or a repeat; after a reorg the tracks above the fork are rewound and replayed.',
+      fact: 'kill -9, then run: the same facts as a run that was never killed',
+      on: ['indexer', 'store', 'journal', 'e_state', 'reader', 'e_facts'].concat(GROUPS),
+      run: function () {
+        var lane = groups[1].lanes[0];
+        stream({ e: 'e_state', c: 'state', labels: ['state + cursor'], every: 1500, dur: 0.5, at: 1.6 });
+        later(function () { paused = true; flash({ x: IDX.x, y: IDX.y, w: 150, text: 'process killed', cls: 'bad', ms: 1100 }); }, 300);
+        later(function () { paused = false; flash({ x: IDX.x, y: IDX.y, w: 250, text: 'restarted: resumed from the journal’s cursor', cls: 'good' }); }, 1500);
+        later(function () {
+          for (var c = lane.cur - 3; c < lane.cur; c++) lane.orph[c] = true;
+          lane.cur -= 3; lane.render();
+          flash({ x: IDX.x, y: IDX.y, w: 250, text: 'reorg: 3 blocks orphaned → rewound to the fork', cls: 'bad' });
+          dropRow();
+        }, 4200);
+        later(function () { for (var c = 0; c < CELLS; c++) lane.orph[c] = false; lane.render(); }, 5400);
+        later(function () { flash({ x: IDX.x, y: IDX.y, w: 236, text: 'replayed from the fork: facts rewritten', cls: 'good' }); }, 6600);
+      }
+    },
+    {
+      name: 'Change the logic, no re-fetch',
+      title: 'Change the processing logic: the index is recomputed from the persistent store. No fetch, and no full reindex.',
+      body: 'Everything ever fetched is kept, keyed by what it is, beside each track’s state and cursor. Bump a kind’s version and only that kind is rebuilt, aside, from the store, while readers keep its old facts; then it is swapped in one go. Trade-off: the store grows with everything ever fetched.',
+      fact: 'run --rebuild: every track recomputed, 0 requests',
+      on: ['k_transfers', 'indexer', 'grp1', 'store', 'archive', 'journal', 'e_replay', 'e_store', 'e_get_k_transfers', 'reader', 'e_facts', 'planner'],
+      run: function () {
+        var k = K.k_transfers;
+        later(function () {
+          k.codeEls[2].textContent = 'emit(Transfer { .., fee })'; k.codeEls[2].classList.add('changed');
+          version(k, 'v2'); called(k.id, 1200);
+          flash({ x: k.cx, y: k.y - 12, w: 170, text: 'logic changed · version 2', cls: 'accent' });
+        }, 400);
+        later(function () {
+          setBar(1, true, 0);
+          var w = 0; var iv = setInterval(function () { w += 3; setBar(1, true, Math.min(w, CELLS * CW - 1)); if (w >= CELLS * CW) clearInterval(iv); }, 60);
+          timers.push(iv);
+          stream({ e: 'e_replay', c: 'backfill', labels: ['logs: read back', 'calls: read back', 'headers: read back'], every: 520, dur: 0.5 });
+          stream({ e: 'e_get_k_transfers', c: 'backfill', labels: ['log'], every: 520, dur: 0.9, r: 4, at: 0.3 });
+          stream({ e: 'e_facts', c: 'fact', labels: ['Transfer v2'], every: 700, dur: 0.5, at: 0.6, then: function () { addRow('Transfer'); } });
+          flash({ x: IDX.x, y: IDX.y, w: 270, text: 'token_transfers rebuilt aside, from the store', cls: 'accent' });
+        }, 1600);
+        later(function () { flash({ x: PLN.x, y: PLN.y, w: 190, text: 'requests sent: 0 · nothing fetched', cls: 'good', ms: 3000 }); }, 2400);
+        later(function () { flash({ x: IDX.x, y: IDX.y, w: 260, text: 'v2 caught up: swapped in one go, no full reindex', cls: 'good' }); }, 6400);
+      },
+      end: function () {
+        var k = K.k_transfers;
+        k.codeEls[2].textContent = k.code[2]; k.codeEls[2].classList.remove('changed');
+        version(k, 'v1'); setBar(1, false, 0);
+      }
+    },
+    {
+      name: 'A track started later',
+      title: 'A track started later reads its contract from the block it was created at, while the others stay at the head.',
+      body: 'Each track has its own cursor. A contract found by an API, a factory’s log or by hand gets a track that backfills from its creation block. With one head per chain, every contract has to be known up front: a factory, or a list.',
+      fact: 't.spawn::<TokenTransfers>(Contract { address, from: its creation block, .. })',
+      on: ['k_disc', 'k_transfers', 'e_spawn', 'e_ask_k_disc', 'e_get_k_disc', 'indexer', 'grp0', 'grp1', 'e_ask_k_transfers', 'e_get_k_transfers', 'e_facts', 'reader'],
+      run: function () {
+        factsFromLogs(0.5);
+        later(function () { flash({ x: K.k_disc.cx, y: K.k_disc.y - 12, w: 190, text: 'GET /contracts: ARB is new', cls: 'accent' }); packet({ e: 'e_ask_k_disc', c: 'live', l: 'need:creation ARB', dur: 0.9 }); }, 300);
+        later(function () { packet({ e: 'e_get_k_disc', c: 'live', l: 'created at #180,221,004', dur: 0.9 }); }, 1400);
+        later(function () { packet({ e: 'e_spawn', c: 'fact', l: 'spawn ARB', dur: 0.6 }); }, 2500);
+        later(function () {
+          extraLane.cur = 0; extraLane.render(); extraLane.g.style.opacity = '1';
+          flash({ x: IDX.x, y: IDX.y, w: 270, text: 'ARB: backfilling from its creation block', cls: 'accent' });
+          stream({ e: 'e_ask_k_transfers', c: 'backfill', labels: ['need:log ARB, from creation'], every: 1200, dur: 0.9, r: 4 });
+          stream({ e: 'e_get_k_transfers', c: 'backfill', labels: ['log'], every: 1200, dur: 0.9, r: 4, at: 0.6 });
+        }, 3200);
+        later(function () { flash({ x: IDX.x, y: IDX.y, w: 250, text: 'USDC, WETH, DAI stayed at the head', cls: 'good' }); }, 6400);
+        later(function () { flash({ x: IDX.x, y: IDX.y, w: 230, text: 'ARB caught up: live', cls: 'good' }); }, 8400);
+      },
+      end: function () { extraLane.g.style.opacity = '0'; }
+    }
+  ];
+  var SCENE_MS = 9800, LOOP_MS = SCENE_MS + 300;
+
+  // ---- showing a scene -----------------------------------------------------------
+  var allIds = Object.keys(N).concat(Object.keys(E)).concat(GROUPS, ['p1', 'p2']);
+  function elOf(id) { return N[id] ? N[id] : (E[id] ? E[id].g : (PK[id] ? PK[id].g : document.getElementById(id))); }
+  var current = null;
+  function clearFx() {
+    timers.forEach(function (t) { clearTimeout(t); clearInterval(t); }); timers = [];
+    while (L.pkts.firstChild) L.pkts.removeChild(L.pkts.firstChild);
+    var fx = L.fx.querySelectorAll('.flash'); for (var i = 0; i < fx.length; i++) L.fx.removeChild(fx[i]);
+    paused = false; onLog = null;
+    if (current && current.end) current.end();
+  }
+  function play(sc) {
+    sc.run();
+    later(function () { clearFx(); if (sc === scenes[3]) clearPile(); play(sc); }, LOOP_MS);
+  }
+  function show(i) {
+    var sc = scenes[i];
+    clearFx();
+    if (!(current === scenes[3] && sc === scenes[4])) clearPile();
+    current = sc;
+    var on = {}; sc.on.forEach(function (id) { on[id] = true; });
+    allIds.forEach(function (id) {
+      var g = elOf(id); if (!g) return;
+      g.classList.toggle('dimmed', !on[id]);
+      if (N[id] || E[id]) g.classList.toggle('on', !!on[id]);
+    });
+    document.getElementById('cap-title').textContent = sc.title;
+    document.getElementById('cap-body').textContent = sc.body;
+    document.getElementById('cap-fact').textContent = sc.fact;
+    var btns = document.querySelectorAll('#scenes button');
+    for (var b = 0; b < btns.length; b++) {
+      btns[b].setAttribute('aria-current', b === i ? 'true' : 'false');
+      var bar = btns[b].querySelector('.bar');
+      bar.style.transition = 'none'; bar.style.width = '0';
+    }
+    play(sc);
+  }
+
+  // ---- controls --------------------------------------------------------------------
+  var list = document.getElementById('scenes');
+  scenes.forEach(function (sc, i) {
+    var li = document.createElement('li');
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.innerHTML = '<span class="n">' + (i + 1) + '</span><span></span><span class="bar"></span>';
+    b.querySelector('span:nth-child(2)').textContent = sc.name;
+    b.addEventListener('click', function () { stop(); go(i); });
+    li.appendChild(b); list.appendChild(li);
+  });
+  var cur = 0, playing = true, tick = null;
+  var playBtn = document.getElementById('play');
+  var hint = document.getElementById('hint');
+  function go(i) {
+    cur = (i + scenes.length) % scenes.length;
+    show(cur);
+    if (playing) {
+      var bar = document.querySelectorAll('#scenes button')[cur].querySelector('.bar');
+      requestAnimationFrame(function () { requestAnimationFrame(function () {
+        bar.style.transition = 'width ' + SCENE_MS + 'ms linear'; bar.style.width = '100%';
+      }); });
+      tick = setTimeout(function () { go(cur + 1); }, SCENE_MS);
+    }
+  }
+  function stop() {
+    playing = false; clearTimeout(tick); tick = null;
+    playBtn.textContent = 'Play'; playBtn.setAttribute('aria-pressed', 'false');
+    hint.textContent = 'staying on this scene · play to go on';
+  }
+  function start() {
+    playing = true;
+    playBtn.textContent = 'Pause'; playBtn.setAttribute('aria-pressed', 'true');
+    hint.textContent = 'plays on its own · click a scene to stay on it';
+    go(cur + 1);
+  }
+  playBtn.addEventListener('click', function () { if (playing) stop(); else start(); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'ArrowRight') { stop(); go(cur + 1); }
+    if (ev.key === 'ArrowLeft') { stop(); go(cur - 1); }
+    if (ev.key === ' ' && ev.target === document.body) { ev.preventDefault(); if (playing) stop(); else start(); }
+  });
+  go(0);
+})();
+</script>
+</body>
+</html>
